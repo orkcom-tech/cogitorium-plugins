@@ -26,8 +26,10 @@ jobs:
           # The base as well as the head: the interesting question is not
           # whether this file is valid, it is what this submission did to it.
           fetch-depth: 0
+          path: catalog
 
       - name: Refuse a submission that also changes the rules
+        working-directory: catalog
         run: |
           set -euo pipefail
           changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
@@ -45,19 +47,38 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Install the checker
-        # The same binary the product ships. Pinned to a ref rather than
-        # floating on latest: what CI accepts should change when somebody
-        # decides it changes, not when a release happens to land mid-review.
-        run: go install github.com/orkcom-tech/cogitorium/cmd/cogitorium@${{ vars.COGITORIUM_REF || 'refactor/plugin-system' }}
+      - name: Build the checker
+        # Checked out and built rather than `go install ...@ref`, because a
+        # module version string cannot contain a slash and every branch name
+        # here has one. Building from a ref also means this catalog can be
+        # tested against an unreleased Cogitorium, which is the situation it
+        # will spend its first weeks in.
+        #
+        # Pinned to a ref rather than floating: what CI accepts should change
+        # when somebody decides it changes, not when a release lands
+        # mid-review.
+        uses: actions/checkout@v4
+        with:
+          repository: orkcom-tech/cogitorium
+          ref: ${{ vars.COGITORIUM_REF || 'refactor/plugin-system' }}
+          path: .cogitorium
+
+      - name: Install it
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/cogitorium" ./cmd/cogitorium
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+        working-directory: .cogitorium
 
       - name: Read the catalog, and say what this submission did
+        working-directory: catalog
         run: |
           set -euo pipefail
           git show origin/${{ github.base_ref }}:plugins.json > /tmp/base-plugins.json
           cogitorium plugins check-catalog plugins.json --base /tmp/base-plugins.json
 
       - name: Install every plugin this adds, and refuse it if it would not load
+        working-directory: catalog
         # An entry pointing at nothing is worse than no entry: it is a row in
         # somebody's library that fails when they press install. So the release
         # is fetched and the bundle is composed here, once, rather than by
