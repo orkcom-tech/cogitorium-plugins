@@ -1,0 +1,15 @@
+# Who may merge what.
+#
+# This file is the whole verification mechanism. There are no signatures and no
+# keys, because those defend against somebody who controls this repository —
+# and if that has happened they are already serving whatever they like to every
+# client, including the next release's pinned keys. Access control is the
+# mechanism; cryptography on top of it would be decoration.
+#
+# plugins.json is deliberately absent from this list: an addition to it merges
+# on green CI, so an author lists their own plugin without waiting for anybody.
+
+/verified.json      @abyssmemes
+/CODEOWNERS         @abyssmemes
+/.github/           @abyssmemes
+/README.md          @abyssmemes

@@ -1,0 +1,112 @@
+# What happens to a pull request against this catalog.
+#
+# The rules are not implemented here. They are `cogitorium plugins
+# check-catalog` and `check-bundle`, which are the same code the client and the
+# server run — so a submission cannot pass CI and then fail to load on the
+# first machine that installs it. A validator written in this file would be a
+# second opinion about the format, and the two would disagree eventually, with
+# the disagreement landing on an author who did nothing wrong.
+
+name: submission
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base as well as the head: the interesting question is not
+          # whether this file is valid, it is what this submission did to it.
+          fetch-depth: 0
+
+      - name: Refuse a submission that also changes the rules
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "$changed"
+          if echo "$changed" | grep -qvE '^(plugins\.json|verified\.json)$'; then
+            echo
+            echo "This pull request changes more than the catalog files."
+            echo "A submission that also edits the workflows, the owners file or"
+            echo "the README is not a submission — it is a change to how"
+            echo "submissions are judged, and it goes through review."
+            exit 1
+          fi
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install the checker
+        # The same binary the product ships. Pinned to a ref rather than
+        # floating on latest: what CI accepts should change when somebody
+        # decides it changes, not when a release happens to land mid-review.
+        run: go install github.com/orkcom-tech/cogitorium/cmd/cogitorium@${{ vars.COGITORIUM_REF || 'refactor/plugin-system' }}
+
+      - name: Read the catalog, and say what this submission did
+        run: |
+          set -euo pipefail
+          git show origin/${{ github.base_ref }}:plugins.json > /tmp/base-plugins.json
+          cogitorium plugins check-catalog plugins.json --base /tmp/base-plugins.json
+
+      - name: Install every plugin this adds, and refuse it if it would not load
+        # An entry pointing at nothing is worse than no entry: it is a row in
+        # somebody's library that fails when they press install. So the release
+        # is fetched and the bundle is composed here, once, rather than by
+        # every person who tries it.
+        run: |
+          set -euo pipefail
+          git show origin/${{ github.base_ref }}:plugins.json > /tmp/base-plugins.json
+          added=$(jq -r --slurpfile base /tmp/base-plugins.json \
+            '[.[] | select(.id as $id | ($base[0] | map(.id) | index($id) | not))] | .[] | "\(.id) \(.repo)"' plugins.json)
+
+          if [ -z "$added" ]; then
+            echo "No new entries."
+            exit 0
+          fi
+
+          while read -r id repo; do
+            [ -n "$id" ] || continue
+            url="https://github.com/$repo/releases/latest/download/$id.zip"
+            echo "::group::$id"
+            echo "$url"
+            if ! curl -fsSL --max-filesize 33554432 -o "/tmp/$id.zip" "$url"; then
+              echo
+              echo "There is no $id.zip on the latest release of $repo."
+              echo "Publishing is: tag a release, and attach the zip that"
+              echo "  cogitorium plugins build ."
+              echo "wrote. The file has to be named $id.zip — that name is what"
+              echo "every install fetches."
+              exit 1
+            fi
+            cogitorium plugins check-bundle "/tmp/$id.zip"
+            echo "::endgroup::"
+          done <<< "$added"
+
+  merge:
+    # Additions merge on their own. Listing your own plugin takes nothing away
+    # from anybody, and making a stranger wait for one of us to be awake is how
+    # a catalog ends up with nothing in it.
+    #
+    # Edits and removals never reach here: check-catalog exits non-zero on
+    # them, so this job's dependency fails and the pull request waits.
+    needs: check
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: gh pr merge --squash --auto "$NUMBER"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ github.event.pull_request.number }}
