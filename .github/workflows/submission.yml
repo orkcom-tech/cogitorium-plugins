@@ -63,9 +63,22 @@ jobs:
           ref: ${{ vars.COGITORIUM_REF || 'refactor/plugin-system' }}
           path: .cogitorium
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .cogitorium/web/package-lock.json
+
       - name: Install it
+        # The interface is built first because the server embeds it with
+        # `go:embed all:dist`, and a pattern matching nothing is a compile
+        # error rather than an empty directory. Nothing in this job serves a
+        # page — but the binary that validates a submission is the binary that
+        # ships, and keeping a second CLI-only build shape would be a second
+        # thing that can drift.
         run: |
           set -euo pipefail
+          (cd web && npm ci --no-audit --no-fund && npm run build)
           go build -o "$RUNNER_TEMP/cogitorium" ./cmd/cogitorium
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
         working-directory: .cogitorium
