@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "id": "pulse",
+    "name": "Pulse",
+    "author": "orkcom",
+    "description": "Charts a workspace's token spend, network and running agents in a panel.",
+    "repo": "orkcom-tech/cogitorium-pulse"
+  }
+]
