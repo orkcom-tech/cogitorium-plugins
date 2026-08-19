@@ -1,0 +1,73 @@
+# Withdrawing an entry, when the reason is not "the author changed their mind".
+#
+# A plugin whose repository is gone, whose release was pulled, or that turned
+# out to do something it should not, has to be removable — and removal is
+# deliberately not automatic, so this is the path a person takes rather than a
+# rule the machine applies.
+#
+# It is a workflow rather than a documented procedure because the ordering
+# matters: the entry leaves plugins.json AND the index, and doing only the
+# first leaves clients offering a version of something that is no longer
+# listed.
+
+name: yank
+
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: The plugin id to withdraw
+        required: true
+      reason:
+        description: Why, in one line. It goes in the commit message and stays there.
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  withdraw:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take it out of both files
+        env:
+          ID: ${{ inputs.id }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -euo pipefail
+          if ! jq -e --arg id "$ID" 'any(.[]; .id == $id)' plugins.json >/dev/null; then
+            echo "No entry with id $ID."
+            exit 1
+          fi
+
+          jq --arg id "$ID" 'map(select(.id != $id))' plugins.json > /tmp/p.json
+          mv /tmp/p.json plugins.json
+
+          # The index too, and in the same commit. Removing only the catalog
+          # leaves clients able to resolve a version for something that is no
+          # longer listed.
+          if [ -f index.json ]; then
+            jq --arg id "$ID" 'map(select(.id != $id))' index.json > /tmp/i.json
+            mv /tmp/i.json index.json
+          fi
+
+          # The verified list as well: a mark that outlives its entry would
+          # reappear the moment somebody reused the id.
+          if [ -f verified.json ]; then
+            jq --arg id "$ID" 'map(select(.id != $id))' verified.json > /tmp/v.json
+            mv /tmp/v.json verified.json
+          fi
+
+          git config user.name  'cogitorium-catalog'
+          git config user.email 'noreply@github.com'
+          git add plugins.json index.json verified.json 2>/dev/null || git add plugins.json
+          git commit -m "yank: $ID
+
+          $REASON
+
+          Withdrawn from plugins.json, index.json and verified.json together.
+          Anything already installed stays installed — this catalog lists where
+          plugins are and has never been able to reach into an install."
+          git push

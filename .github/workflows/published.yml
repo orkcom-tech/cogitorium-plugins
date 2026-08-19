@@ -1,0 +1,53 @@
+# Telling a submitter their entry is live.
+#
+# CI merged their pull request and then said nothing, so an author's next
+# signal was noticing it themselves — or asking. A merged pull request with no
+# comment reads as "something happened to it", which is the state people open
+# issues about.
+
+name: published
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  say-so:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on the merged submission
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$NUMBER" --repo "${{ github.repository }}" --body "$(cat <<'EOF'
+          **It is live.** Your entry is in `plugins.json`, and every install
+          browsing the library will see it within a day — the index refreshes
+          on a schedule, and clients cache what they last fetched.
+
+          What happens from here without you doing anything:
+
+          - **Publishing a new version** is tagging a release with `<id>.zip`
+            attached. You do not touch this repository again — the index job
+            reads your releases and clients notice.
+          - **Nobody is told what anyone has installed.** Clients fetch the
+            whole index and compare locally, so we cannot see who runs your
+            plugin. That is by construction rather than by policy.
+
+          Two things that are not automatic:
+
+          - **The verified mark** is somebody on our side reading a specific
+            version. It is not a queue you are in and not a quality judgement —
+            most plugins in a healthy catalog never get one.
+          - **Changing or removing this entry** needs a person, because an edit
+            can point an id people already installed at a different repository.
+            Open a pull request and say what you want changed.
+
+          Thank you for publishing it.
+          EOF
+          )"
