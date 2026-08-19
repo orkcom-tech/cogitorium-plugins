@@ -52,10 +52,16 @@ jobs:
             # error here. It means the version is unknown, and an entry with no
             # version is exactly what a client already copes with — it reports
             # that it cannot tell, which is true, instead of guessing.
+            # The TAG, verbatim, not a tidied version string. What goes here
+            # is what the pinned download URL is built from —
+            # releases/download/<tag>/<id>.zip — so stripping a leading v
+            # produced a URL for a tag that does not exist, and every pinned
+            # install 404'd while "latest" kept working. Comparison is
+            # unaffected: the version parser already ignores a leading v.
             version=$(gh release view --repo "$repo" --json tagName -q .tagName 2>/dev/null || true)
             if [ -n "$version" ]; then
-              entry=$(echo "$entry" | jq --arg v "${version#v}" '. + {version: $v}')
-              echo "$id -> ${version#v}"
+              entry=$(echo "$entry" | jq --arg v "$version" '. + {version: $v}')
+              echo "$id -> $version"
             else
               echo "$id -> (no release)"
             fi
